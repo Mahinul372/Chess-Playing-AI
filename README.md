@@ -18,17 +18,37 @@ python app.py
   All chess rules apply: castling, en passant, check, checkmate, stalemate.
   Pawn promotion is auto-queen.
 - **New game** restarts. **Undo** takes back your last move and the AI's reply.
-- **Play as** switches sides. **AI vs AI** lets the two sides play each other.
+- **You: White (switch)** shows the side you play now; click it to switch.
+  **AI vs AI** lets the two sides play each other.
 - **Depth** (2–4) sets how many moves ahead the AI searches. Deeper is
   stronger but slower. Plain Minimax is capped at depth 3 — depth 4
   without pruning takes about 30 seconds a move. **Alpha-Beta / Minimax**
   switches the search mode.
+- When a game starts, a card over the board says which side you are
+  playing — "YOU are playing as White" (you move first) or "YOU are
+  playing as Black" (the AI opens the game). It disappears once the game
+  is under way.
+- Captured pieces show on the right as they fall — the piece in its own
+  colour, with a line like "Your Queen is eliminated" (or "AI's Queen is
+  eliminated" when you take one). En passant counts as a capture too.
+- When the game ends, a **GAME OVER!** banner says why — checkmate,
+  stalemate, too few pieces to mate, the same position three times, or 50
+  moves with no capture and no pawn move. The AI never shuffles the same
+  pieces forever: a move that repeats a position is penalised, and a
+  mating move is never delayed by that penalty.
 
 ## What the AI shows you
 
 After each AI move, the right panel shows its best move, the position
 score, search depth, positions searched, branches pruned, time taken, the
 best line it expects, and its top 5 candidate moves.
+
+**How the AI thinks** — the four cards under the board — is a 2-minute
+lesson in plain words: 1) look ahead, 2) score the board, 3) expect the
+worst (Minimax), 4) skip the hopeless (Alpha-Beta pruning). The line
+under the cards always shows what the AI just did in your game — how many
+positions it looked at, how many branches it skipped, and one branch it
+skipped as an example.
 
 **See search tree** opens the real tree from that move:
 
@@ -75,9 +95,16 @@ with faster mates preferred. The score is an estimate, not a guarantee.
 
 | File              | What it is                                              |
 | ----------------- | ------------------------------------------------------- |
-| `app.py`          | The game: board, controls, tree view, explanations      |
+| `app.py`          | The game: board, controls, tree view, lesson, GAME OVER |
 | `engine.py`       | Evaluation, Minimax, Alpha-Beta, and the recorded tree  |
+| `test_engine.py`  | Headless checks: pruning, mate in 1, repetition, draws  |
+| `assets/pieces.png`| Piece artwork (one sprite sheet, 12 pieces)            |
 | `requirements.txt`| `python-chess` (rules) and `pygame` (interface)         |
+| `LICENSE`         | GNU GPLv3 licence text                                  |
+
+Piece artwork: the Cburnett chess set (Wikimedia Commons, GFDL / BSD /
+GPL). If `assets/pieces.png` is missing, the game falls back to text
+glyphs for the pieces.
 
 ## License
 

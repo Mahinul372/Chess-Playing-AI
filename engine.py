@@ -97,6 +97,63 @@ TABLES = {
 MATE_SCORE = 100000
 INF = float("inf")
 
+# Repetition: shuffling the same pieces back and forth wins nothing. A move
+# that repeats a position already seen in this game is penalised -- a little
+# for the second visit, a lot for the third (which would let either side
+# claim a draw and end the game). A mating move is exempt from the penalty
+# entirely, so the AI never delays a checkmate to avoid a repeat.
+REPETITION_PENALTY_ONCE = 30
+REPETITION_PENALTY_THRICE = 500
+
+
+def position_key(board):
+    """The key python-chess uses to spot a repeated position: the pieces,
+    the side to move, castling rights and the en-passant square."""
+    return board._transposition_key()
+
+
+def repetition_penalty(times_seen):
+    """How much a move is docked for returning to a position already seen
+    `times_seen` times in this game (centipawns)."""
+    if times_seen >= 2:
+        return REPETITION_PENALTY_THRICE
+    if times_seen == 1:
+        return REPETITION_PENALTY_ONCE
+    return 0
+
+
+def game_over_reason(board):
+    """Why the game is over, for the GAME OVER banner. Returns None while
+    the game can still continue. Threefold repetition and the fifty-move
+    rule are claims in chess, not automatic -- here the game claims them
+    at once, so a game can never shuffle the same pieces forever."""
+    if board.is_checkmate():
+        winner = "Black" if board.turn == chess.WHITE else "White"
+        return {"headline": f"Checkmate — {winner} wins!",
+                "detail": "The king is in check and has no legal move.",
+                "result": board.result()}
+    if board.is_stalemate():
+        return {"headline": "Stalemate — draw",
+                "detail": "No legal moves, but the king is not in check.",
+                "result": board.result()}
+    if board.is_insufficient_material():
+        return {"headline": "Draw — not enough pieces left",
+                "detail": "Neither side has enough material to checkmate.",
+                "result": board.result()}
+    if board.is_repetition(3) or board.is_fivefold_repetition():
+        return {"headline": "Draw — same position three times",
+                "detail": "Repeating the same moves cannot win; the game is a draw.",
+                "result": board.result()}
+    if board.is_fifty_moves() or board.is_seventyfive_moves():
+        return {"headline": "Draw — 50 moves, no progress",
+                "detail": "Fifty moves with no capture and no pawn move is a draw.",
+                "result": board.result()}
+    if board.is_game_over():
+        return {"headline": "Game over",
+                "detail": "The game has ended.",
+                "result": board.result()}
+    return None
+
 
 def evaluate(board):
     """Score a position in centipawns, from White's point of view.
@@ -251,9 +308,17 @@ def _mark_remaining_pruned(board, node, alpha, beta, stats):
             node.children.append(pruned)
 
 
-def best_move(board, depth, use_pruning=True):
+def best_move(board, depth, use_pruning=True, history_keys=None):
     """Search from `board` and return the AI's move plus everything the
-    search saw: the tree, the stats, and each root move's score."""
+    search saw: the tree, the stats, and each root move's score.
+
+    `history_keys` maps position keys seen so far in this game to how many
+    times each occurred. A move that repeats a position is docked by
+    `repetition_penalty`, so the AI prefers to make progress instead of
+    shuffling pieces back and forth. The docked (effective) score is what
+    the candidate table shows, because that is what the AI decided on.
+    `avoided_repetition` is True when the penalty changed the AI's pick.
+    """
     stats = SearchStats()
     root = TreeNode("start", depth, board.turn == chess.WHITE, -INF, INF,
                     board.fen())
@@ -263,32 +328,67 @@ def best_move(board, depth, use_pruning=True):
     stats.time = time.time() - start
 
     # Root children hold one score per legal move: the candidate table.
-    candidates = sorted(
+    raw = sorted(
         ((child.san, child.value) for child in root.children
          if child.value is not None),
         key=lambda item: item[1],
         reverse=(board.turn == chess.WHITE),
     )
-    if not candidates:
+    if not raw:
         # Game already over (mate / stalemate): no move to return.
         return {"move": None, "san": None, "value": value, "tree": root,
-                "stats": stats, "candidates": [], "pv": []}
-    # The best move is the first candidate; the principal variation is the
-    # best line: follow each node's best child down to a leaf.
+                "stats": stats, "candidates": [], "pv": [],
+                "avoided_repetition": False}
+
+    # Dock moves that would repeat a position already seen in this game.
+    # Scores are White's point of view, so a penalty lowers the score for
+    # White and raises it for Black -- worse for whoever is about to move.
+    history_keys = history_keys or {}
+    effective = {}
+    for san, score in raw:
+        move = next((m for m in board.legal_moves
+                     if board.san(m) == san), None)
+        penalty = 0
+        if move is not None and abs(score) < MATE_SCORE - 1000:
+            # Never let a repetition worry delay a forced mate: a mating
+            # move is exempt from the penalty entirely.
+            board.push(move)
+            penalty = repetition_penalty(
+                history_keys.get(position_key(board), 0))
+            board.pop()
+        if board.turn == chess.WHITE:
+            effective[san] = score - penalty
+        else:
+            effective[san] = score + penalty
+    candidates = sorted(raw, key=lambda item: effective[item[0]],
+                        reverse=(board.turn == chess.WHITE))
+    candidates = [(san, effective[san]) for san, _ in candidates]
+    avoided = candidates[0][0] != raw[0][0]
+
+    # The best move is the first candidate. The principal variation is the
+    # best line from that move: follow the chosen child's best children.
+    chosen_san = candidates[0][0]
     move = None
+    chosen_child = None
     for legal in board.legal_moves:
-        if board.san(legal) == candidates[0][0]:
+        if board.san(legal) == chosen_san:
             move = legal
             break
-    pv = _principal_variation(root)
+    for child in root.children:
+        if child.san == chosen_san:
+            chosen_child = child
+            break
+    pv = [chosen_san] + _principal_variation(chosen_child) \
+        if chosen_child is not None else [chosen_san]
     return {
         "move": move,
-        "san": candidates[0][0] if candidates else None,
-        "value": value,
+        "san": chosen_san,
+        "value": effective[chosen_san],
         "tree": root,
         "stats": stats,
         "candidates": candidates,
         "pv": pv,
+        "avoided_repetition": avoided,
     }
 
 
@@ -312,10 +412,12 @@ def _principal_variation(node):
     return line
 
 
-def compare(board, depth):
+def compare(board, depth, history_keys=None):
     """Run the same position twice, once plain minimax and once with
     alpha-beta pruning. Both must pick the same move and score -- pruning
     only skips work, it never changes the answer. Returns both reports."""
-    plain = best_move(board, depth, use_pruning=False)
-    pruned = best_move(board, depth, use_pruning=True)
+    plain = best_move(board, depth, use_pruning=False,
+                      history_keys=history_keys)
+    pruned = best_move(board, depth, use_pruning=True,
+                       history_keys=history_keys)
     return {"plain": plain, "pruned": pruned}
