@@ -415,10 +415,10 @@ class App:
         row1 = [
             Button((PANEL_X, y, 120, 36), "New game", self.new_game),
             Button((PANEL_X + 130, y, 120, 36), "Undo", self.undo),
-            Button((PANEL_X + 260, y, 180, 36),
-                   f"Play as: {'White' if self.human_color == chess.WHITE else 'Black'}",
+            Button((PANEL_X + 260, y, 190, 36),
+                   f"You: {'White' if self.human_color == chess.WHITE else 'Black'} (switch)",
                    self.toggle_side),
-            Button((PANEL_X + 450, y, 180, 36),
+            Button((PANEL_X + 460, y, 180, 36),
                    "AI vs AI: ON" if self.ai_vs_ai else "AI vs AI: off",
                    self.toggle_ai_vs_ai),
         ]
