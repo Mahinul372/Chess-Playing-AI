@@ -1,116 +1,84 @@
 # Chess-Playing-AI
 
+Play real chess against an AI — and watch it think. Every AI move comes
+with the actual search behind it: the moves it considered, their scores,
+and the branches it pruned. Built to make Minimax and Alpha-Beta pruning
+understandable, not just to win games.
+
+## Run
+
+```bash
+pip install -r requirements.txt
+python app.py
+```
+
+## Play
+
+- Click one of your pieces, then click a highlighted square to move.
+  All chess rules apply: castling, en passant, check, checkmate, stalemate.
+  Pawn promotion is auto-queen.
+- **New game** restarts. **Undo** takes back your last move and the AI's reply.
+- **Play as** switches sides. **AI vs AI** lets the two sides play each other.
+- **Depth** (2–4) sets how many moves ahead the AI searches. Deeper is
+  stronger but slower. Plain Minimax is capped at depth 3 — depth 4
+  without pruning takes about 30 seconds a move. **Alpha-Beta / Minimax**
+  switches the search mode.
+
+## What the AI shows you
+
+After each AI move, the right panel shows its best move, the position
+score, search depth, positions searched, branches pruned, time taken, the
+best line it expects, and its top 5 candidate moves.
+
+**See search tree** opens the real tree from that move:
+
+- Green node — White to move (MAX). Blue node — Black to move (MIN).
+- Red node — pruned: the AI skipped this branch.
+- Gold ring — the best line (principal variation).
+- Click a node to expand it and see the board behind it. **Replay search**
+  shows the nodes in the order the AI visited them.
+
+**Compare both** runs the same position twice — plain Minimax, then
+Alpha-Beta — and reports nodes searched and time for each.
+
+## How Minimax works
+
+The AI tries every legal move, then assumes the opponent answers with
+their best move, and so on to the search depth. Each end position gets a
+score (see below). White picks the move with the highest score, Black the
+lowest. That is the whole idea: maximise your own outcome while the
+opponent minimises it.
+
+## How Alpha-Beta pruning works
+
+While searching, the AI tracks two numbers. **Alpha** is the best score
+White can already guarantee; **beta** is the best score Black can already
+guarantee. If a branch cannot beat the best move already found, the rest
+of that branch is skipped — it cannot change the decision. Pruning finds
+the exact same best move as plain Minimax while searching far fewer
+positions. The tree shows the skipped branches in red.
+
+## How positions are scored
+
+Material plus piece placement, in centipawns (100 = one pawn), from
+White's point of view. Positive favours White, negative favours Black.
+
+| Piece  | Pawn | Knight | Bishop | Rook | Queen |
+| ------ | ---- | ------ | ------ | ---- | ----- |
+| Value  | 100  | 320    | 330    | 500  | 900   |
+
+Piece-square tables add small bonuses for good squares (advanced pawns,
+central knights, a safe king). Checkmate scores as a forced win or loss,
+with faster mates preferred. The score is an estimate, not a guarantee.
+
+## Files
+
+| File              | What it is                                              |
+| ----------------- | ------------------------------------------------------- |
+| `app.py`          | The game: board, controls, tree view, explanations      |
+| `engine.py`       | Evaluation, Minimax, Alpha-Beta, and the recorded tree  |
+| `requirements.txt`| `python-chess` (rules) and `pygame` (interface)         |
+
 ## License
-This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
 
-A chess-playing AI using Minimax with Alpha-Beta Pruning that simulates strategic gameplay between two agents. The project involved optimizing search trees and implementing decision-making under constraints. Which will help to understand game theory, heuristics, and evaluation functions in real-world scenarios.
-  1. Minimax Algorithm Demonstration:
-  
-  Visually illustrates the minimax algorithm, a fundamental decision-making technique in game AI
-  
-  Shows alpha-beta pruning optimization in action (with pruned nodes displayed differently)
-  
-  2. Game Theory Concepts:
-  
-  Models adversarial decision-making between two players
-  
-  Demonstrates how AI evaluates future game states to make optimal moves
-  
-  3. Educational Value:
-  
-  Makes abstract algorithms concrete through visualization
-  
-  Shows the tree structure of possible moves and evaluations
-  
-  Helps students understand recursive algorithms visually
-  
-  4. AI Strength Modeling:
-  
-  Implements a mathematical model (logarithmic + linear components) to simulate player strengths
-  
-  Includes randomness to simulate real-world uncertainty in game outcomes
-  
-  5. Interactive Learning:
-  
-  Allows users to input different parameters (starting player, strength values)
-  
-  Shows how these parameters affect the game tree and outcomes
-  
-  6. Tournament Simulation:
-  
-  Runs multiple games with alternating starting players
-  
-  Tracks and displays overall tournament results
-  
-  7. Software Engineering Aspects:
-  
-  Demonstrates good OOP principles with classes for nodes, input boxes, and the visualizer
-  
-  Shows clean state management between different application phases
-  
-  Includes robust input validation
-  
-  8. Visual Design:
-  
-  Color-codes different node types (max, min, pruned)
-  
-  Provides clear legends and instructions
-  
-  Animates the game tree construction
-
-***This project serves as an excellent bridge between theoretical CS concepts and practical implementation, making it valuable for:
-
-Computer science students learning about game AI
-
-Educators looking for teaching tools
-
-Anyone interested in understanding how chess AIs evaluate positions
-
-Developers learning about algorithm visualization techniques
-
-***Now let us discuss how this actually works: 
-1. Input Phase:
-You collect 3 inputs:
-
-Starting player (0 = Cristiano, 1 = Lionel)
-
-Cristiano’s strength (base value for AI evaluation)
-
-Lionel’s strength (base value for AI evaluation)
-#Strength Calculation
-Each AI’s strength is converted into a numerical score using:
-                    strength(x)=log2​(x+1)+10x​
-Why log? Diminishing returns (a 10-strength AI isn’t 10× better than a 1-strength one).
-Why x/10? Adds a linear scaling effect.
-#Utility (Evaluation) Function
-At the end of each branch (depth=5), the AI evaluates the position using:
-utility=strength(maxV)−strength(minV)+random noise
-Random noise (±0.1-0.2) simulates slight uncertainty in AI evaluations.
-
-If utility > 0, the maximizing player (e.g., Cristiano) is winning.
-
-If utility < 0, the minimizing player (e.g., Lionel) is winning.
-
-2. Minimax Algorithm with Alpha-Beta Pruning
-(A) How Minimax Works:
-Maximizing player (Cristiano) picks moves that increase utility.
-
-Minimizing player (Lionel) picks moves that decrease utility.
-
-The AI recursively explores possible moves up to depth 5.
-
-(B) Alpha-Beta Pruning
-Optimization: Skips evaluating branches that won’t change the final decision.
-
-Pruned nodes appear in red in your visualization.
-
-(C) Final Decision
-The root node (top of the tree) picks the best move based on Minimax.
-
-3. Tournament Simulation
-Four games are played (alternating starting players).
-
-Each game generates a new Minimax tree and computes a winner.
-
-Final results show total wins for Cristiano vs. Lionel.
-
+GNU General Public License v3.0 — see [LICENSE](LICENSE).
