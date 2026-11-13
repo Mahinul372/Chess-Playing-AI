@@ -303,6 +303,7 @@ class App:
         self.ai_depth = 3
         self.use_pruning = True
         self.ai_vs_ai = False
+        self.handicap = "even"  # AI vs AI: "even", "white" or "black" deeper
         self.selected = None
         self.targets = []
         self.last_move = None
@@ -371,8 +372,10 @@ class App:
 
     def ai_move(self):
         self.ai_pending = False
-        report = engine.best_move(self.board, self.ai_depth, self.use_pruning,
-                                  history_keys=self.history_keys)
+        depth = self.ai_depth_for(self.board.turn)
+        report = engine.best_move(self.board, depth, self.use_pruning,
+                                  history_keys=self.history_keys,
+                                  randomize=True)
         if report["move"] is None:
             return
         san = report["san"]
@@ -623,8 +626,12 @@ class App:
         if self.board.move_stack:
             return None
         if self.ai_vs_ai:
+            if self.handicap == "even":
+                return ("AI vs AI",
+                        "Watch the two sides play each other.")
+            favoured = "White" if self.handicap == "white" else "Black"
             return ("AI vs AI",
-                    "Watch the two sides play each other.")
+                    f"{favoured} searches one level deeper — expect a winner.")
         if self.human_color == chess.WHITE:
             return ("YOU are playing as White",
                     "You move first — click one of your pieces to begin.")
@@ -726,7 +733,7 @@ class App:
             s = r["stats"]
             algo = "Alpha-Beta" if self.use_pruning else "Minimax"
             lines = [
-                f"AI ({algo}, depth {self.ai_depth}): best move {r['san']} "
+                f"AI ({algo}, depth {r['depth']}): best move {r['san']} "
                 f"({engine.format_score(r['value'])})",
                 f"Positions searched: {s.nodes}   Pruned: {s.pruned}   "
                 f"Time: {s.time:.2f}s",
@@ -735,6 +742,10 @@ class App:
                     f"{san}  {engine.format_score(val)}"
                     for san, val in r["candidates"][:5]),
             ]
+            if r.get("random_pick"):
+                lines.append(
+                    f"Picked at random from {r['near_best']} moves within "
+                    f"0.3 of the best — no two games play the same.")
             if self.avoided_repetition:
                 lines.append("Skipped a move that would repeat a position.")
             card_h = len(lines) * self.font.get_linesize() + 16
@@ -824,7 +835,9 @@ class App:
                    f"You: {'White' if self.human_color == chess.WHITE else 'Black'} (switch)",
                    self.toggle_side),
             Button((PANEL_X + 460, y, 180, 36),
-                   "AI vs AI: ON" if self.ai_vs_ai else "AI vs AI: off",
+                   ("AI vs AI: off" if not self.ai_vs_ai
+                    else "AI vs AI: even" if self.handicap == "even"
+                    else f"AI vs AI: {self.handicap.title()} +1"),
                    self.toggle_ai_vs_ai),
         ]
         y = 108
@@ -866,9 +879,31 @@ class App:
         # Let the start banner be readable before the AI opens the game.
         self.next_ai_time = pygame.time.get_ticks() + 1500
 
+    def ai_depth_for(self, color):
+        """Search depth for the side to move. In AI vs AI with a handicap,
+        the favoured side searches one level deeper and the other one
+        level shallower, so the stronger side can actually win."""
+        depth = self.ai_depth
+        if not self.ai_vs_ai or self.handicap == "even":
+            return depth
+        favoured = chess.WHITE if self.handicap == "white" else chess.BLACK
+        if color == favoured:
+            return min(4, depth + 1)
+        return max(2, depth - 1)
+
     def toggle_ai_vs_ai(self):
-        self.ai_vs_ai = not self.ai_vs_ai
-        if self.ai_vs_ai:
+        """Cycle: off -> even -> White one level deeper -> Black one level
+        deeper -> off. An even match between identical engines is a draw;
+        the handicap is what makes a winner possible."""
+        order = ["even", "white", "black", "off"]
+        current = "off" if not self.ai_vs_ai else self.handicap
+        nxt = order[(order.index(current) + 1) % len(order)]
+        if nxt == "off":
+            self.ai_vs_ai = False
+            self.handicap = "even"
+        else:
+            self.ai_vs_ai = True
+            self.handicap = nxt
             self.next_ai_time = pygame.time.get_ticks() + 400
 
     def cycle_depth(self):
@@ -900,24 +935,58 @@ class App:
         return out
 
     def tree_coords(self):
-        """One row per depth, nodes spaced evenly across the row.
+        """Tidy layout: each visible leaf gets its own column and a parent
+        sits centred over its visible children, so the shape of the search
+        reads at a glance instead of names piling up on one row. Rows are
+        spread down the screen, one per depth, with the left gutter saying
+        whose turn that row is.
 
-        A tidy parent-centred layout spreads siblings apart whenever one
-        branch is expanded; even spacing keeps the candidate moves readable
-        no matter which branch is open.
+        Returns (visible, coords, levels, rooms): `rooms` maps a node id
+        to the pixels to its nearest neighbour on the same row, which
+        decides whether its label fits.
         """
         visible = self.visible_nodes()
+        in_visible = {id(n) for n, _ in visible}
         levels = {}
         for node, depth in visible:
             levels.setdefault(depth, []).append(node)
+        kids = {id(n): [c for c in n.children if id(c) in in_visible]
+                for n, _ in visible}
+        slots = {}
+        counter = [0]
+
+        def place(node):
+            children = kids[id(node)]
+            if not children:
+                slots[id(node)] = counter[0]
+                counter[0] += 1
+            else:
+                for child in children:
+                    place(child)
+                slots[id(node)] = (slots[id(children[0])]
+                                   + slots[id(children[-1])]) / 2
+
+        place(self.tree)
+        total = max(counter[0], 1)
+        max_depth = max(levels) if levels else 0
+        left, right = 112, WIDTH - 40
+        top, bottom = 118, HEIGHT - 210
+        # Spread the rows down the screen, but never so far apart that a
+        # barely-expanded tree looks empty -- 150px between rows is plenty.
+        row_h = min(150, (bottom - top) / max(1, max_depth))
         coords = {}
+        for node, depth in visible:
+            x = left + (right - left) * (slots[id(node)] + 0.5) / total
+            coords[id(node)] = (x, top + depth * row_h)
+        rooms = {}
         for depth, nodes in levels.items():
-            count = len(nodes)
-            for i, node in enumerate(nodes):
-                x = 40 + (WIDTH - 80) * (i + 0.5) / count
-                y = 110 + depth * 74
-                coords[id(node)] = (x, y)
-        return visible, coords, levels
+            ordered = sorted(nodes, key=lambda n: coords[id(n)][0])
+            xs = [coords[id(n)][0] for n in ordered]
+            for i, node in enumerate(ordered):
+                left_gap = xs[i] - xs[i - 1] if i > 0 else 999
+                right_gap = xs[i + 1] - xs[i] if i < len(xs) - 1 else 999
+                rooms[id(node)] = min(left_gap, right_gap)
+        return visible, coords, levels, rooms
 
     def pv_nodes(self):
         """Nodes on the principal variation, by id."""
@@ -941,18 +1010,38 @@ class App:
             self.screen,
             "Green = White's turn (MAX), blue = Black's turn (MIN), red = pruned: "
             "the AI skipped this branch. Gold ring = the best line. "
-            "Click a node to expand it and see the board behind it.",
+            "Click a node to expand it and see the board behind it. Labels "
+            "appear only where they fit — click any node for its move and score.",
             self.font, 24, y, WIDTH - 48, MUTED) + 6
         if self.tree is None:
             self.draw_text_block(self.screen, "No search yet — play a move first.",
                                  self.font, 24, y + 20, 600)
             return
-        visible, coords, levels = self.tree_coords()
+        visible, coords, levels, rooms = self.tree_coords()
         pv = self.pv_nodes()
+        # Whose turn each row is, in the left gutter.
+        for depth, nodes in levels.items():
+            _, row_y = coords[id(nodes[0])]
+            maxing = nodes[0].maximizing
+            side = "White" if maxing else "Black"
+            kind = "MAX" if maxing else "MIN"
+            self.screen.blit(self.small.render(side, True, MUTED),
+                             (16, row_y - 10))
+            self.screen.blit(
+                self.small.render(f"to move · {kind}", True, MUTED),
+                (16, row_y + 6))
         # Node labels: always show them for the root's children (the
         # candidate moves). Deeper down, label only the best line, pruned
-        # nodes and the selected node -- otherwise the labels overlap.
-        # A row shows values when its nodes have room for them.
+        # nodes and the selected node. A label appears only if its
+        # neighbours leave room for it; on a crowded row, alternate
+        # labels above and below the nodes so they stop piling up on one
+        # line. A node shows its value when there is room for that too.
+        # Anything unlabelled is one click away in the detail strip below.
+        level_index = {}
+        for depth, nodes in levels.items():
+            ordered = sorted(nodes, key=lambda n: coords[id(n)][0])
+            for i, node in enumerate(ordered):
+                level_index[id(node)] = i
         # edges
         for node, depth in visible:
             for child in node.children:
@@ -977,22 +1066,26 @@ class App:
             if self.selected_node is node:
                 pygame.draw.circle(self.screen, (255, 255, 255),
                                    (int(cx), int(cy)), 18, 2)
-            space = (WIDTH - 80) / len(levels[depth])
-            show_value = revealed and node.value is not None and space >= 55
+            room = rooms[id(node)]
+            show_value = revealed and node.value is not None and room >= 60
             label = None
-            if depth <= 1:
-                label = (f"{node.san} {engine.format_score(node.value)}"
-                         if show_value else node.san)
-            elif id(node) in pv or node.pruned or self.selected_node is node:
-                if node.pruned:
-                    label = node.san
-                elif show_value:
-                    label = f"{node.san} {engine.format_score(node.value)}"
-                else:
-                    label = node.san
+            if room >= 22:
+                if depth <= 1:
+                    label = (f"{node.san} {engine.format_score(node.value)}"
+                             if show_value else node.san)
+                elif id(node) in pv or node.pruned or self.selected_node is node:
+                    if node.pruned:
+                        label = node.san
+                    elif show_value:
+                        label = (f"{node.san} "
+                                 f"{engine.format_score(node.value)}")
+                    else:
+                        label = node.san
             if label:
+                above = room < 46 and level_index[id(node)] % 2 == 1
+                ly = cy - 26 if above else cy + 26
                 text = self.small.render(label, True, INK)
-                self.screen.blit(text, text.get_rect(center=(cx, cy + 26)))
+                self.screen.blit(text, text.get_rect(center=(cx, ly)))
         # detail strip
         self.draw_node_detail()
 
@@ -1026,7 +1119,7 @@ class App:
     def tree_click(self, pos):
         if self.tree is None:
             return
-        visible, coords, levels = self.tree_coords()
+        visible, coords, levels, rooms = self.tree_coords()
         for node, depth in visible:
             cx, cy = coords[id(node)]
             if (pos[0] - cx) ** 2 + (pos[1] - cy) ** 2 <= 20 ** 2:
@@ -1056,6 +1149,19 @@ class App:
     def show_all_tree(self):
         self.revealed = 10 ** 9
         self.replay = False
+
+    def check_move_cap(self):
+        """AI vs AI safety stop: after 200 moves with no result, call it
+        a draw instead of letting the game sit there with no winner and
+        no message."""
+        if (self.ai_vs_ai and self.game_over_info is None
+                and len(self.board.move_stack) >= 200):
+            self.game_over_info = {
+                "headline": "Draw — 200 moves, no winner",
+                "detail": ("Neither side could force a win in 200 moves; "
+                           "the game is a draw."),
+                "result": "*"}
+            self.ai_pending = False
 
     # ------------------------------------------------------------ main loop
     def run(self):
@@ -1087,14 +1193,14 @@ class App:
 
             if self.screen_name == "play":
                 self.draw_play()
+                self.check_move_cap()
                 if (self.ai_pending and self.game_over_info is None
                         and pygame.time.get_ticks() >= self.next_ai_time):
                     # show "AI thinking…" before the blocking search runs
                     pygame.display.flip()
                     self.ai_move()
                 elif (self.ai_vs_ai and self.game_over_info is None
-                        and pygame.time.get_ticks() >= self.next_ai_time
-                        and len(self.board.move_stack) < 200):
+                        and pygame.time.get_ticks() >= self.next_ai_time):
                     pygame.display.flip()
                     self.ai_move()
             else:

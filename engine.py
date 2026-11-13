@@ -5,6 +5,7 @@ what the AI looked at: every move, every value, and every branch that was
 pruned. Nothing here is simulated -- the tree comes from real legal moves.
 """
 
+import random
 import time
 
 import chess
@@ -308,7 +309,11 @@ def _mark_remaining_pruned(board, node, alpha, beta, stats):
             node.children.append(pruned)
 
 
-def best_move(board, depth, use_pruning=True, history_keys=None):
+RANDOM_THRESHOLD = 30  # centipawns: moves this close to the best are equals
+
+
+def best_move(board, depth, use_pruning=True, history_keys=None,
+              randomize=False):
     """Search from `board` and return the AI's move plus everything the
     search saw: the tree, the stats, and each root move's score.
 
@@ -318,6 +323,13 @@ def best_move(board, depth, use_pruning=True, history_keys=None):
     shuffling pieces back and forth. The docked (effective) score is what
     the candidate table shows, because that is what the AI decided on.
     `avoided_repetition` is True when the penalty changed the AI's pick.
+
+    `randomize` makes the AI vary its play: instead of always taking the
+    single best move, it picks at random from the moves within
+    RANDOM_THRESHOLD centipawns of the best, so no two games open the
+    same way. Off by default, so tests and the plain-vs-pruned comparison
+    stay deterministic. A forced mate is never randomised away: when the
+    best move mates, it is always played at once.
     """
     stats = SearchStats()
     root = TreeNode("start", depth, board.turn == chess.WHITE, -INF, INF,
@@ -337,8 +349,9 @@ def best_move(board, depth, use_pruning=True, history_keys=None):
     if not raw:
         # Game already over (mate / stalemate): no move to return.
         return {"move": None, "san": None, "value": value, "tree": root,
-                "stats": stats, "candidates": [], "pv": [],
-                "avoided_repetition": False}
+                "stats": stats, "candidates": [], "pv": [], "depth": depth,
+                "avoided_repetition": False, "random_pick": False,
+                "near_best": 0}
 
     # Dock moves that would repeat a position already seen in this game.
     # Scores are White's point of view, so a penalty lowers the score for
@@ -365,9 +378,26 @@ def best_move(board, depth, use_pruning=True, history_keys=None):
     candidates = [(san, effective[san]) for san, _ in candidates]
     avoided = candidates[0][0] != raw[0][0]
 
-    # The best move is the first candidate. The principal variation is the
-    # best line from that move: follow the chosen child's best children.
+    # Vary the play: pick at random from the moves within a third of a
+    # pawn of the best, instead of always taking the single top move.
+    # Mates are exempt -- a forced mate is always played at once.
     chosen_san = candidates[0][0]
+    near_best = 1
+    random_pick = False
+    if randomize and len(candidates) > 1:
+        best_score = candidates[0][1]
+        if abs(best_score) < MATE_SCORE - 1000:
+            near = [(san, sc) for san, sc in candidates
+                    if abs(sc) < MATE_SCORE - 1000
+                    and abs(sc - best_score) <= RANDOM_THRESHOLD]
+            near_best = len(near)
+            if near_best > 1:
+                chosen_san = random.choice(near)[0]
+                random_pick = chosen_san != candidates[0][0]
+
+    # The chosen move is the first candidate, unless randomisation picked
+    # another near-best move. The principal variation is the best line
+    # from that move: follow the chosen child's best children.
     move = None
     chosen_child = None
     for legal in board.legal_moves:
@@ -388,7 +418,10 @@ def best_move(board, depth, use_pruning=True, history_keys=None):
         "stats": stats,
         "candidates": candidates,
         "pv": pv,
+        "depth": depth,
         "avoided_repetition": avoided,
+        "random_pick": random_pick,
+        "near_best": near_best,
     }
 
 
@@ -415,9 +448,11 @@ def _principal_variation(node):
 def compare(board, depth, history_keys=None):
     """Run the same position twice, once plain minimax and once with
     alpha-beta pruning. Both must pick the same move and score -- pruning
-    only skips work, it never changes the answer. Returns both reports."""
+    only skips work, it never changes the answer. Randomisation is off
+    here on purpose, so the two runs are directly comparable. Returns
+    both reports."""
     plain = best_move(board, depth, use_pruning=False,
-                      history_keys=history_keys)
+                      history_keys=history_keys, randomize=False)
     pruned = best_move(board, depth, use_pruning=True,
-                       history_keys=history_keys)
+                       history_keys=history_keys, randomize=False)
     return {"plain": plain, "pruned": pruned}

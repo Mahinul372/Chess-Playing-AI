@@ -19,7 +19,14 @@ python app.py
   Pawn promotion is auto-queen.
 - **New game** restarts. **Undo** takes back your last move and the AI's reply.
 - **You: White (switch)** shows the side you play now; click it to switch.
-  **AI vs AI** lets the two sides play each other.
+  **AI vs AI** cycles off → even → White +1 → Black +1. Even games
+  between identical engines end in draws, so the +1 handicap makes one
+  side search a level deeper (and the other a level shallower) — that is
+  what makes a winner possible. A game that reaches 200 moves with no
+  result ends in a draw.
+- The AI does not play the same game twice: at each turn it picks at
+  random from the moves within 0.3 of the best, so openings vary from
+  game to game. A forced mate is always played at once, never varied away.
 - **Depth** (2–4) sets how many moves ahead the AI searches. Deeper is
   stronger but slower. Plain Minimax is capped at depth 3 — depth 4
   without pruning takes about 30 seconds a move. **Alpha-Beta / Minimax**
@@ -32,10 +39,10 @@ python app.py
   colour, with a line like "Your Queen is eliminated" (or "AI's Queen is
   eliminated" when you take one). En passant counts as a capture too.
 - When the game ends, a **GAME OVER!** banner says why — checkmate,
-  stalemate, too few pieces to mate, the same position three times, or 50
-  moves with no capture and no pawn move. The AI never shuffles the same
-  pieces forever: a move that repeats a position is penalised, and a
-  mating move is never delayed by that penalty.
+  stalemate, too few pieces to mate, the same position three times, 50
+  moves with no capture and no pawn move, or 200 moves with no result.
+  The AI never shuffles the same pieces forever: a move that repeats a
+  position is penalised, and a mating move is never delayed by that penalty.
 
 ## What the AI shows you
 
@@ -50,7 +57,12 @@ under the cards always shows what the AI just did in your game — how many
 positions it looked at, how many branches it skipped, and one branch it
 skipped as an example.
 
-**See search tree** opens the real tree from that move:
+**See search tree** opens the real tree from that move, laid out so it
+reads: each parent sits centred over its children, rows are spread down
+the screen, and the left gutter says whose turn each row is. Labels
+appear only where they fit — on a crowded row they alternate above and
+below the nodes — and clicking any node shows its move, score, alpha and
+beta in the strip below, with the board behind it:
 
 - Green node — White to move (MAX). Blue node — Black to move (MIN).
 - Red node — pruned: the AI skipped this branch.

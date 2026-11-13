@@ -148,6 +148,42 @@ check("reason: 50 moves without progress is a draw",
       reason is not None and "50 moves" in reason["headline"],
       f"got {reason}")
 
+# 8. Random play: the AI varies its moves instead of repeating the same
+# game every time, but a forced mate is always played at once, and the
+# plain-vs-pruned comparison stays deterministic.
+import random
+
+board = chess.Board()
+first = engine.best_move(board, 2, randomize=False)
+check("no randomisation by default is deterministic",
+      engine.best_move(board, 2, randomize=False)["san"] == first["san"])
+picks = set()
+for seed in range(12):
+    random.seed(seed)
+    report = engine.best_move(board, 2, randomize=True)
+    picks.add(report["san"])
+    best_score = max(score for _, score in report["candidates"])
+    chosen = next(sc for san, sc in report["candidates"]
+                  if san == report["san"])
+    check(f"random pick within 0.3 of best (seed {seed})",
+          abs(chosen - best_score) <= engine.RANDOM_THRESHOLD,
+          f"chose {report['san']} {chosen} vs best {best_score}")
+check("random play varies the opening", len(picks) > 1, f"picks: {picks}")
+# Mate in 1 is never randomised away.
+board = chess.Board(
+    "r1bqkbnr/pppp1ppp/2n5/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 0 1")
+for seed in range(6):
+    random.seed(seed)
+    report = engine.best_move(board, 2, randomize=True)
+    check(f"mate in 1 still played (seed {seed})",
+          report["san"] == "Qxf7#", f"got {report['san']}")
+# Compare stays deterministic and the two searches agree.
+board = chess.Board()
+result = engine.compare(board, 2)
+check("compare: plain and pruned pick the same move",
+      result["plain"]["san"] == result["pruned"]["san"],
+      f"{result['plain']['san']} vs {result['pruned']['san']}")
+
 print()
 if FAILURES:
     print(f"{len(FAILURES)} FAILURES: {FAILURES}")
